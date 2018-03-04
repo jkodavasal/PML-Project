@@ -1,0 +1,82 @@
+---
+title: "Predicting quality of activity from fitness data"
+output: html_document
+---
+
+#Synopsis:
+
+This is an analysis of fitness data for 6 participants. The goal is to use the training data which contains various measurements as the participants are performing the activity and the quality with which they performed the activity (Classe going from A to E); to predict the "classe" for 20 test data points.
+
+#Data Processing:
+
+I this section we download the training and test data and store it in the working directory. Note that the original source of this data is http://groupware.les.inf.puc-rio.br/har
+```{r, cache=TRUE, message=FALSE, warning=FALSE}
+library(caret)
+if (!file.exists('./pml-training.csv')){
+        download.file("https://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv", "pml-training.csv")
+}
+if (!file.exists('./pml-testing.csv')){
+        download.file("https://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv", "pml-testing.csv")
+}
+
+training <- read.csv("pml-training.csv", sep = ",", na.strings = c("", "NA"))
+testing <- read.csv("pml-testing.csv", sep = ",", na.strings = c("", "NA"))
+
+```
+
+I this section we remove all the features with NAs in the testing set, remove features 1-7, since they are things like names of people, entry number, and also time-series information which are not relevant to predicting quality of outcome. Then subset the features of the training set to match those in the test set. 
+```{r, cache=TRUE, message=FALSE, warning=FALSE}
+testing_subset<-testing[,colSums(is.na(testing))==0]
+#this results in 60 columns
+#We then remove 1st seven columns and last column problem_id, since it's not in training
+testing_subset<-testing_subset[,8:59]
+# Subset training to features used in testing case, and add "classe"
+features <- names(testing_subset)
+training_subset <- training[,c(features,"classe")]
+#Add problem Id again to testing
+testing_subset <- testing[,c(features,"problem_id")]
+
+```
+
+#Feature selection
+Remove highly correlated features. In this case, this results in 3 features being removed
+
+```{r, cache=TRUE, message=FALSE, warning=FALSE}
+data<-training_subset[,-53]
+tmp <- cor(data)
+tmp[upper.tri(tmp)] <- 0
+diag(tmp) <- 0
+data.new <- data[,!apply(tmp,2,function(x) any(x > 0.90))]
+data.new$classe<-training_subset$classe
+training_subset<-data.new
+```
+
+
+#Model building and evaluation
+Here we use the training_subset to split into 75-25 for training and cross-validation
+```{r, cache=TRUE, message=FALSE, warning=FALSE}
+set.seed(100)
+inTrain<-createDataPartition(training_subset$classe, p = 0.75, list = F)
+trn<-training_subset[inTrain,]
+tst<-training_subset[-inTrain,]
+```
+
+We use a Random Forest model, since it performs well for classification problems to see how it performs here
+```{r, cache=TRUE, message=FALSE, warning=FALSE}
+set.seed(100)
+control = trainControl(method = "oob")
+fitRF = train(classe ~ ., trn, method = "rf", ntree = 200, trControl = control)
+predRF<-predict(fitRF,tst)
+#Compute accuracy on cross-validation data
+sum(predRF==tst$classe)/length(tst$classe)*100
+```
+Note, that we get an over 99% accuracy on cross validation data, which is pretty good
+
+#Predicting on actual test data to submit
+We just use the same fitRF model to predict on the actual test data
+```{r, cache=TRUE, message=FALSE, warning=FALSE}
+final_prediction<-predict(fitRF,testing_subset)
+submit<-data.frame(problem.id=testing_subset$problem_id)
+submit$answers<-final_prediction
+submit
+```
